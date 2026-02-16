@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 module FOUR_INPUT_MUX_tb;
-
+// JENICO PRESTON R11911335
 	// Inputs
 	reg [7:0] A;
 	reg [7:0] B;

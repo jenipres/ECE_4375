@@ -1,5 +1,5 @@
 `timescale 1ns / 1ps
-// R11911335
+// JENICO PRESTON R11911335
 module FOUR_INPUT_MUL(A,B,C,D,sel,X);
 // initialize
 input [7:0] A,B,C,D;

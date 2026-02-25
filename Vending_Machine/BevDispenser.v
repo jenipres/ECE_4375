@@ -1,7 +1,7 @@
 `timescale 1ns / 1ps
 module BevDispenser(
     input  wire        inB1, inB2, inB3, inB4,
-    input  wire [9:0]  moneyIn,          // FIX: input, not output
+    input  wire [9:0]  moneyIn,          
     input  wire        vend_enable,
     output reg         vend_ok,
     output reg  [9:0]  vend_price,

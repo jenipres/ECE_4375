@@ -4,9 +4,11 @@ R-Number: R11911335
 Assignment: Project 3
 */
 module alu (
-    input  wire [31:0] busA,
-    input  wire [31:0] busB,
-    input  wire [4:0]  ALUOp,
+    input wire clk,
+    input wire reset,
+    input wire [31:0] busA,
+    input wire [31:0] busB,
+    input wire [4:0]  ALUOp,
 
     output reg  [31:0] result,
     output wire        z,
@@ -15,7 +17,7 @@ module alu (
     output reg         v
 );
 
-    // ALU operation codes
+    // Operation encoding (control unit will drive ALUOp)
     localparam ADD = 5'b00000;
     localparam SUB = 5'b00001;
     localparam NOT = 5'b00010;
@@ -25,11 +27,12 @@ module alu (
     localparam SHR = 5'b00110;
     localparam SHL = 5'b00111;
     localparam LD  = 5'b01000;
-
+    
+    // 33-bit temp register to capture carry-out (bit 32)
     reg [32:0] temp;
 
     always @(*) begin
-        // defaults
+        // Default values to avoid unintended latches
         result = 32'b0;
         c = 1'b0;
         v = 1'b0;
@@ -37,40 +40,49 @@ module alu (
 
         case (ALUOp)
             ADD: begin
-              temp = {1'b0, busA} + {1'b0, busB};
-              
+              temp = {1'b0, busA} + {1'b0, busB}; // Extend to 33 bits so we can capture carry-out
+              result = temp [31:0];
+              c = temp[32:0]; // carry-out
+              v = (~(busA[31] ^ busB[31])) & (busA[31] ^ result[31]); // Overflow: same sign inputs, different sign result
             end
 
             SUB: begin
               temp = {1'b0, busA} - {1'b0, busB};
+                result = temp [31:0];
+                c = temp[32:0]; // carry-out
+                v = (~(busA[31] ^ busB[31])) & (busA[31] ^ result[31]);
             end
 
             NOT: begin
-               
+               result = ~busA;
             end
-
+    
             AND: begin
-              
+               result = busA & busB;
             end
 
             OR: begin
-               
+               result = busA | busB;
             end
 
             XOR: begin
-                
+               result = busA ^ busB;
             end
 
             SHR: begin
-               
+                result = busA >> busB[4:0]; // shift amount = lower 5 bits
+                if (busB[4:0] != 0)
+                c = busA[busB[4:0]-1]; // last bit shifted out
             end
 
             SHL: begin
-                
+                result = busA << busB[4:0];
+                if (busB[4:0] != 0)
+                c = busA[32 - busB[4:0]]; // last bit shifted out
             end
 
             LD: begin
-                
+                result = busA; // move operation
             end
 
             default: begin

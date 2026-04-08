@@ -4,8 +4,6 @@ R-Number: R11911335
 Assignment: Project 3
 */
 module alu (
-    input wire clk,
-    input wire reset,
     input wire [31:0] busA,
     input wire [31:0] busB,
     input wire [4:0]  ALUOp,

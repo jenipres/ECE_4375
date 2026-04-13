@@ -4,9 +4,9 @@ R-Number: R11911335
 Assignment: Project 3
 */
 module alu (
-    input wire [31:0] busA,
-    input wire [31:0] busB,
-    input wire [4:0]  ALUOp,
+    input  wire [31:0] busA,
+    input  wire [31:0] busB,
+    input  wire [4:0]  ALUOp,
 
     output reg  [31:0] result,
     output wire        z,
@@ -15,84 +15,88 @@ module alu (
     output reg         v
 );
 
-    // Operation encoding (control unit will drive ALUOp)
-    localparam ADD = 5'b00000;
-    localparam SUB = 5'b00001;
-    localparam NOT = 5'b00010;
-    localparam AND = 5'b00011;
-    localparam OR  = 5'b00100;
-    localparam XOR = 5'b00101;
-    localparam SHR = 5'b00110;
-    localparam SHL = 5'b00111;
-    localparam LD  = 5'b01000;
-    
-    // 33-bit temp register to capture carry-out (bit 32)
+    // Required opcode values from project sheet
+    localparam LD  = 5'h01;
+    localparam ADD = 5'h03;
+    localparam SUB = 5'h04;
+    localparam AND = 5'h05;
+    localparam OR  = 5'h06;
+    localparam XOR = 5'h07;
+    localparam NOT = 5'h08;
+    localparam SHL = 5'h09;
+    localparam SHR = 5'h0A;
+
+    // 33-bit temp to capture carry-out
     reg [32:0] temp;
 
     always @(*) begin
-        // Default values to avoid unintended latches
+        // Safe defaults
         result = 32'b0;
-        c = 1'b0;
-        v = 1'b0;
-        temp = 33'b0;
+        c      = 1'b0;
+        v      = 1'b0;
+        temp   = 33'b0;
 
         case (ALUOp)
-            ADD: begin
-              temp = {1'b0, busA} + {1'b0, busB}; // Extend to 33 bits so we can capture carry-out
-              result = temp [31:0];
-              c = temp[32:0]; // carry-out
-              v = (~(busA[31] ^ busB[31])) & (busA[31] ^ result[31]); // Overflow: same sign inputs, different sign result
+
+            LD: begin
+                result = busA;
             end
 
-            SUB: begin
-              temp = {1'b0, busA} - {1'b0, busB};
-                result = temp [31:0];
-                c = temp[32:0]; // carry-out
+            ADD: begin
+                temp   = {1'b0, busA} + {1'b0, busB};
+                result = temp[31:0];
+                c      = temp[32];
+                // Overflow for signed addition:
+                // same-sign inputs, different-sign result
                 v = (~(busA[31] ^ busB[31])) & (busA[31] ^ result[31]);
             end
 
-            NOT: begin
-               result = ~busA;
+            SUB: begin
+                temp   = {1'b0, busA} - {1'b0, busB};
+                result = temp[31:0];
+                c      = temp[32];
+                // Overflow for signed subtraction:
+                // different-sign inputs, result sign differs from busA
+                v = (busA[31] ^ busB[31]) & (busA[31] ^ result[31]);
             end
-    
+
             AND: begin
-               result = busA & busB;
+                result = busA & busB;
             end
 
             OR: begin
-               result = busA | busB;
+                result = busA | busB;
             end
 
             XOR: begin
-               result = busA ^ busB;
+                result = busA ^ busB;
             end
 
-            SHR: begin
-                result = busA >> busB[4:0]; // shift amount = lower 5 bits
-                if (busB[4:0] != 0)
-                c = busA[busB[4:0]-1]; // last bit shifted out
+            NOT: begin
+                result = ~busA;
             end
 
             SHL: begin
                 result = busA << busB[4:0];
                 if (busB[4:0] != 0)
-                c = busA[32 - busB[4:0]]; // last bit shifted out
+                    c = busA[32 - busB[4:0]];
             end
 
-            LD: begin
-                result = busA; // move operation
+            SHR: begin
+                result = busA >> busB[4:0];
+                if (busB[4:0] != 0)
+                    c = busA[busB[4:0] - 1];
             end
 
             default: begin
-               
+                result = 32'b0;
+                c      = 1'b0;
+                v      = 1'b0;
             end
         endcase
     end
 
     assign z = (result == 32'b0);
     assign n = result[31];
-
-endmodule
-assign zero = (result == 8'h00);
 
 endmodule

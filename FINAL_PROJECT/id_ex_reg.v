@@ -3,6 +3,21 @@
 Name: Jenico Preston
 R-Number: R11911335
 Assignment: Project 5
+
+Purpose:
+This module is the ID/EX pipeline register. It stores the decoded instruction
+information from the decode stage and passes it into the execute stage on the
+next clock edge.
+
+This register carries:
+- PC value for branch target calculation
+- Register data read from the register file
+- Sign-extended immediate value
+- Source and destination register numbers
+- Control signals needed by the ALU, branch unit, memory, and writeback logic
+
+Pipeline role:
+ID stage  ->  ID/EX register  ->  EX stage
 */
 
 module id_ex_reg(
@@ -11,6 +26,7 @@ module id_ex_reg(
     input  wire        enable,
     input  wire        flush,
 
+    // Datapath inputs from the decode stage
     input  wire [31:0] pc_in,
     input  wire [31:0] rs1_data_in,
     input  wire [31:0] rs2_data_in,
@@ -19,6 +35,7 @@ module id_ex_reg(
     input  wire [4:0]  rs1_in,
     input  wire [4:0]  rs2_in,
 
+    // Control inputs from the decoder
     input  wire        reg_write_in,
     input  wire        mem_write_in,
     input  wire        mem_read_in,
@@ -30,6 +47,7 @@ module id_ex_reg(
     input  wire        use_rs1_in,
     input  wire        use_rs2_in,
 
+    // Registered datapath outputs to the execute stage
     output reg  [31:0] pc_out,
     output reg  [31:0] rs1_data_out,
     output reg  [31:0] rs2_data_out,
@@ -38,6 +56,7 @@ module id_ex_reg(
     output reg  [4:0]  rs1_out,
     output reg  [4:0]  rs2_out,
 
+    // Registered control outputs to the execute stage
     output reg         reg_write_out,
     output reg         mem_write_out,
     output reg         mem_read_out,
@@ -50,10 +69,21 @@ module id_ex_reg(
     output reg         use_rs2_out
 );
 
-    // Holds data and control signals between decode and execute
+    // ============================================================
+    // Pipeline Register Update
+    // ============================================================
+    // reset:
+    //   Clears all stored data and control signals.
+    //
+    // flush:
+    //   Inserts a bubble/NOP into the execute stage. This prevents a stalled
+    //   or incorrect instruction from changing registers, RAM, or the PC.
+    //
+    // enable:
+    //   Allows the decoded instruction information to move into EX.
     always @(posedge clk) begin
         if (reset) begin
-            // Clear everything on reset
+            // Clear datapath values
             pc_out           <= 32'd0;
             rs1_data_out     <= 32'd0;
             rs2_data_out     <= 32'd0;
@@ -62,6 +92,7 @@ module id_ex_reg(
             rs1_out          <= 5'd0;
             rs2_out          <= 5'd0;
 
+            // Clear control signals so the stage behaves like a NOP
             reg_write_out    <= 1'b0;
             mem_write_out    <= 1'b0;
             mem_read_out     <= 1'b0;
@@ -74,7 +105,7 @@ module id_ex_reg(
             use_rs2_out      <= 1'b0;
         end
         else if (flush) begin
-            // Clear this stage to insert a bubble
+            // Clear datapath values when inserting a bubble
             pc_out           <= 32'd0;
             rs1_data_out     <= 32'd0;
             rs2_data_out     <= 32'd0;
@@ -83,6 +114,7 @@ module id_ex_reg(
             rs1_out          <= 5'd0;
             rs2_out          <= 5'd0;
 
+            // Disable all write, memory, branch, and hazard-use controls
             reg_write_out    <= 1'b0;
             mem_write_out    <= 1'b0;
             mem_read_out     <= 1'b0;
@@ -95,7 +127,7 @@ module id_ex_reg(
             use_rs2_out      <= 1'b0;
         end
         else if (enable) begin
-            // Move values to the next stage
+            // Pass datapath values into the execute stage
             pc_out           <= pc_in;
             rs1_data_out     <= rs1_data_in;
             rs2_data_out     <= rs2_data_in;
@@ -104,6 +136,7 @@ module id_ex_reg(
             rs1_out          <= rs1_in;
             rs2_out          <= rs2_in;
 
+            // Pass control signals into the execute stage
             reg_write_out    <= reg_write_in;
             mem_write_out    <= mem_write_in;
             mem_read_out     <= mem_read_in;

@@ -25,19 +25,29 @@ module cpu_top(
             data_ram[i] = 32'd0;
 
         // Simple test program
-        instr_rom[0]  = {5'd1,  5'd0,  5'd0, 1'b1, 28'd10,  5'h01}; // load 10
-        instr_rom[1]  = {5'd2,  5'd0,  5'd0, 1'b1, 28'd5,   5'h01}; // load 5
-        instr_rom[2]  = {5'd3,  5'd1,  5'd2, 1'b0, 28'd0,   5'h03}; // add
-        instr_rom[3]  = {5'd4,  5'd3,  5'd0, 1'b1, 28'd7,   5'h03};
-        instr_rom[4]  = {5'd5,  5'd4,  5'd0, 1'b1, 28'd1,   5'h04};
-        instr_rom[5]  = {5'd6,  5'd4,  5'd5, 1'b0, 28'd0,   5'h05};
-        instr_rom[6]  = {5'd7,  5'd6,  5'd0, 1'b1, 28'd3,   5'h06};
-        instr_rom[7]  = {5'd8,  5'd7,  5'd1, 1'b0, 28'd0,   5'h07};
-        instr_rom[8]  = {5'd9,  5'd8,  5'd0, 1'b0, 28'd0,   5'h08};
-        instr_rom[9]  = {5'd10, 5'd9,  5'd0, 1'b1, 28'd2,   5'h09};
-        instr_rom[10] = {5'd11, 5'd10, 5'd0, 1'b1, 28'd1,   5'h0A};
-        instr_rom[11] = {5'd0,  5'd11, 5'd0, 1'b1, 28'd20,  5'h02};
-        instr_rom[12] = {5'd0,  5'd0,  5'd0, 1'b1, 28'h0FFFFFFF, 5'h12}; // loop forever
+        instr_rom[0]  = {5'd1,  5'd0,  5'd0,  1'b1, 28'd10,  5'h01}; // LD  R1, #10
+        instr_rom[1]  = {5'd2,  5'd0,  5'd0,  1'b1, 28'd5,   5'h01}; // LD  R2, #5
+        instr_rom[2]  = {5'd3,  5'd1,  5'd2,  1'b0, 28'd0,   5'h03}; // ADD R3, R1, R2
+        instr_rom[3]  = {5'd4,  5'd3,  5'd0,  1'b1, 28'd7,   5'h03}; // ADD R4, R3, #7
+        instr_rom[4]  = {5'd5,  5'd4,  5'd0,  1'b1, 28'd1,   5'h04}; // SUB R5, R4, #1
+        instr_rom[5]  = {5'd6,  5'd4,  5'd5,  1'b0, 28'd0,   5'h05}; // AND R6, R4, R5
+        instr_rom[6]  = {5'd7,  5'd6,  5'd0,  1'b1, 28'd3,   5'h06}; // OR  R7, R6, #3
+        instr_rom[7]  = {5'd8,  5'd7,  5'd1,  1'b0, 28'd0,   5'h07}; // XOR R8, R7, R1
+        instr_rom[8]  = {5'd9,  5'd8,  5'd0,  1'b0, 28'd0,   5'h08}; // NOT R9, R8
+
+        // These two match the passing self-check testbench:
+        // R10 = R1 << 2 = 40
+        // R11 = R10 >> 1 = 20
+        instr_rom[9]  = {5'd10, 5'd1,  5'd0,  1'b1, 28'd2,   5'h09}; // SL  R10, R1, #2
+        instr_rom[10] = {5'd11, 5'd10, 5'd0,  1'b1, 28'd1,   5'h0A}; // SR  R11, R10, #1
+
+        // Store R11 into RAM[20]
+        // ST format used here: RAM[rs1 + imm] = rs2
+        // rs1 = R0, rs2 = R11, imm = 20
+        instr_rom[11] = {5'd0,  5'd0,  5'd11, 1'b1, 28'd20,  5'h02}; // ST RAM[20], R11
+
+        // Loop forever
+        instr_rom[12] = {5'd0,  5'd0,  5'd0,  1'b1, 28'h0FFFFFFF, 5'h12}; // BRA -1
     end
 
     // Tracks which instruction we are on
@@ -82,12 +92,13 @@ module cpu_top(
     wire [1:0] id_ex_branch_type;
     wire id_ex_use_rs1, id_ex_use_rs2;
 
-    // Forwarding fixes cases where data isn't ready yet
+    // Forwarding fixes cases where data is not ready yet
     wire [31:0] ex_forward_value;
     wire forward_a, forward_b;
 
     wire [31:0] alu_a_in, alu_b_in;
     wire [31:0] branch_rs1_in;
+    wire [31:0] store_data_in;
 
     wire [31:0] alu_result;
     wire alu_zero;
@@ -243,12 +254,18 @@ module cpu_top(
         .use_rs2_out(id_ex_use_rs2)
     );
 
-    // Choose correct values for ALU (forward if needed)
+    // Choose correct values for ALU
     assign ex_forward_value = wb_data;
+
     assign alu_a_in = forward_a ? ex_forward_value : id_ex_rs1_data;
+
     assign alu_b_in = id_ex_alu_src_imm ? id_ex_imm32 :
                       (forward_b ? ex_forward_value : id_ex_rs2_data);
+
     assign branch_rs1_in = forward_a ? ex_forward_value : id_ex_rs1_data;
+
+    // Forward the value being stored for ST instructions
+    assign store_data_in = forward_b ? ex_forward_value : id_ex_rs2_data;
 
     // ALU does math
     alu32 ALU (
@@ -269,7 +286,7 @@ module cpu_top(
         .branch_taken(branch_taken),
         .branch_target(branch_target)
     );
-    
+
     // EX/MEM/WB pipeline register
     ex_mem_wb_reg EX_MEM_WB (
         .clk(clk),
@@ -278,7 +295,7 @@ module cpu_top(
         .flush(1'b0),
 
         .alu_result_in(alu_result),
-        .rs2_data_in(id_ex_rs2_data),
+        .rs2_data_in(store_data_in),
         .imm32_in(id_ex_imm32),
         .rd_in(id_ex_rd),
 

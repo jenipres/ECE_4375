@@ -27,7 +27,7 @@ module instruction_decoder_49(
     output reg         use_rs2
 );
 
-    // Operation codes (what each instruction means)
+    // Operation codes
     localparam OP_LD  = 5'h01;
     localparam OP_ST  = 5'h02;
     localparam OP_ADD = 5'h03;
@@ -42,7 +42,7 @@ module instruction_decoder_49(
     localparam OP_BNZ = 5'h11;
     localparam OP_BRA = 5'h12;
 
-    // ALU operations (what kind of math to do)
+    // ALU operations
     localparam ALU_ADD  = 4'd0;
     localparam ALU_SUB  = 4'd1;
     localparam ALU_AND  = 4'd2;
@@ -62,7 +62,7 @@ module instruction_decoder_49(
     assign opcode   = instr[4:0];
 
     always @(*) begin
-        // Default: do nothing (safe state)
+        // Default: do nothing
         reg_write   = 1'b0;
         mem_write   = 1'b0;
         mem_read    = 1'b0;
@@ -74,21 +74,33 @@ module instruction_decoder_49(
         use_rs1     = 1'b0;
         use_rs2     = 1'b0;
 
-        // Decide what to do based on instruction
         case (opcode)
 
             OP_LD: begin
                 reg_write   = 1'b1;
                 alu_src_imm = 1'b1;
-                alu_op      = ALU_PASS;
-                wb_sel      = 2'b10; // write immediate value
+                use_rs1     = ~imm_mode;
+
+                if (imm_mode) begin
+                    // LD immediate: rd = immediate
+                    mem_read = 1'b0;
+                    alu_op   = ALU_PASS;
+                    wb_sel   = 2'b10;
+                end
+                else begin
+                    // LD memory: rd = RAM[rs1 + immediate]
+                    mem_read = 1'b1;
+                    alu_op   = ALU_ADD;
+                    wb_sel   = 2'b01;
+                end
             end
 
             OP_ST: begin
                 mem_write   = 1'b1;
                 alu_src_imm = 1'b1;
-                alu_op      = ALU_ADD; // find memory address
+                alu_op      = ALU_ADD;
                 use_rs1     = 1'b1;
+                use_rs2     = 1'b1;
             end
 
             OP_ADD: begin

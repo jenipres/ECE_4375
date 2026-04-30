@@ -3,6 +3,24 @@
 Name: Jenico Preston
 R-Number: R11911335
 Assignment: Project 5
+
+Purpose:
+This is the top-level module for the Project 5 pipelined CPU. It connects
+the instruction ROM, data RAM, register file, instruction decoder, pipeline
+registers, ALU, branch unit, hazard unit, forwarding unit, and writeback mux.
+
+Pipeline stages:
+IF      - Program counter and instruction fetch from ROM
+ID      - Instruction decode, register read, immediate extension, hazard check
+EX      - ALU operation, branch decision, and forwarding
+MEM/WB  - Data memory access and register writeback
+
+Instruction format:
+{rd[4:0], rs1[4:0], rs2[4:0], imm_mode, imm28[27:0], opcode[4:0]}
+
+Memory sizes:
+Instruction ROM: 64 locations x 49 bits
+Data RAM:        256 locations x 32 bits = 1 KiB
 */
 
 module cpu_top(
@@ -10,21 +28,30 @@ module cpu_top(
     input  wire reset
 );
 
-    // Small memory so the CPU has instructions and data to run
+    // ============================================================
+    // Instruction ROM and Data RAM
+    // ============================================================
+    // The instruction ROM holds 64 49-bit instructions.
+    // The data RAM holds 256 32-bit words, giving a total size of 1 KiB.
     reg [48:0] instr_rom [0:63];
     reg [31:0] data_ram [0:255];
 
     integer i;
 
     initial begin
-        // Clear memory at start
+        // Clear instruction ROM before loading the program
         for (i = 0; i < 64; i = i + 1)
             instr_rom[i] = 49'd0;
 
+        // Clear all RAM locations at startup
         for (i = 0; i < 256; i = i + 1)
             data_ram[i] = 32'd0;
 
-        // Simple test program
+        // ========================================================
+        // Built-in program used for basic CPU operation
+        // ========================================================
+        // These instructions exercise immediate loads, ALU operations,
+        // shifts, a store to memory, and a final branch loop.
         instr_rom[0]  = {5'd1,  5'd0,  5'd0,  1'b1, 28'd10,  5'h01}; // LD  R1, #10
         instr_rom[1]  = {5'd2,  5'd0,  5'd0,  1'b1, 28'd5,   5'h01}; // LD  R2, #5
         instr_rom[2]  = {5'd3,  5'd1,  5'd2,  1'b0, 28'd0,   5'h03}; // ADD R3, R1, R2
@@ -35,38 +62,47 @@ module cpu_top(
         instr_rom[7]  = {5'd8,  5'd7,  5'd1,  1'b0, 28'd0,   5'h07}; // XOR R8, R7, R1
         instr_rom[8]  = {5'd9,  5'd8,  5'd0,  1'b0, 28'd0,   5'h08}; // NOT R9, R8
 
-        // These two match the passing self-check testbench:
+        // Shift instructions:
         // R10 = R1 << 2 = 40
         // R11 = R10 >> 1 = 20
         instr_rom[9]  = {5'd10, 5'd1,  5'd0,  1'b1, 28'd2,   5'h09}; // SL  R10, R1, #2
         instr_rom[10] = {5'd11, 5'd10, 5'd0,  1'b1, 28'd1,   5'h0A}; // SR  R11, R10, #1
 
-        // Store R11 into RAM[20]
+        // Store R11 into RAM[20].
         // ST format used here: RAM[rs1 + imm] = rs2
         // rs1 = R0, rs2 = R11, imm = 20
         instr_rom[11] = {5'd0,  5'd0,  5'd11, 1'b1, 28'd20,  5'h02}; // ST RAM[20], R11
 
-        // Loop forever
+        // Branch forever to keep the processor from running into random code
         instr_rom[12] = {5'd0,  5'd0,  5'd0,  1'b1, 28'h0FFFFFFF, 5'h12}; // BRA -1
     end
 
-    // Tracks which instruction we are on
+    // ============================================================
+    // IF Stage Signals
+    // ============================================================
+
+    // Program counter tracks the current instruction address
     reg [31:0] pc;
 
-    // Fetch instruction from memory
+    // Fetch instruction from the 64-location ROM.
+    // Only pc[5:0] is used because the ROM has 64 entries.
     wire [48:0] instr_fetch;
     assign instr_fetch = instr_rom[pc[5:0]];
 
-    // Pipeline: instruction moves from fetch to decode
+    // IF/ID pipeline register outputs
     wire [31:0] if_id_pc;
     wire [48:0] if_id_instr;
 
-    // Decoder breaks instruction into parts
+    // ============================================================
+    // ID Stage Signals
+    // ============================================================
+
+    // Decoded instruction fields
     wire [4:0] dec_opcode, dec_rd, dec_rs1, dec_rs2;
     wire dec_imm_mode;
     wire [27:0] dec_imm28;
 
-    // Control signals tell later stages what to do
+    // Control signals produced by the decoder
     wire dec_reg_write, dec_mem_write, dec_mem_read;
     wire dec_alu_src_imm;
     wire [3:0] dec_alu_op;
@@ -75,15 +111,19 @@ module cpu_top(
     wire [1:0] dec_branch_type;
     wire dec_use_rs1, dec_use_rs2;
 
-    // Values read from registers
+    // Register file read data and sign-extended immediate
     wire [31:0] rf_busA, rf_busB;
     wire [31:0] imm32;
 
-    // Values moving into execute stage
+    // ============================================================
+    // ID/EX Pipeline Register Signals
+    // ============================================================
+
+    // Data values passed into the execute stage
     wire [31:0] id_ex_pc, id_ex_rs1_data, id_ex_rs2_data, id_ex_imm32;
     wire [4:0] id_ex_rd, id_ex_rs1, id_ex_rs2;
 
-    // Control signals carried forward in pipeline
+    // Control signals carried into the execute stage
     wire id_ex_reg_write, id_ex_mem_write, id_ex_mem_read;
     wire id_ex_alu_src_imm;
     wire [3:0] id_ex_alu_op;
@@ -92,33 +132,49 @@ module cpu_top(
     wire [1:0] id_ex_branch_type;
     wire id_ex_use_rs1, id_ex_use_rs2;
 
-    // Forwarding fixes cases where data is not ready yet
+    // ============================================================
+    // EX Stage Signals
+    // ============================================================
+
+    // Forwarding signals are used to handle data hazards without waiting
+    // for values to fully write back into the register file.
     wire [31:0] ex_forward_value;
     wire forward_a, forward_b;
 
+    // ALU inputs and branch/store forwarded values
     wire [31:0] alu_a_in, alu_b_in;
     wire [31:0] branch_rs1_in;
     wire [31:0] store_data_in;
 
+    // ALU output
     wire [31:0] alu_result;
     wire alu_zero;
 
-    // Branch decides if we jump to a new instruction
+    // Branch control
     wire branch_taken;
     wire [31:0] branch_target;
 
-    // Final stage before writeback
+    // ============================================================
+    // EX/MEM/WB Pipeline Register Signals
+    // ============================================================
+
+    // Data carried to memory/writeback stage
     wire [31:0] ex_mem_alu_result, ex_mem_rs2_data, ex_mem_imm32;
     wire [4:0] ex_mem_rd;
 
+    // Control carried to memory/writeback stage
     wire ex_mem_reg_write, ex_mem_mem_write, ex_mem_mem_read;
     wire [1:0] ex_mem_wb_sel;
 
-    // Value that gets written back to registers
+    // RAM read data and final writeback data
     reg [31:0] mem_read_data;
     reg [31:0] wb_data;
 
-    // Stall pauses pipeline if data is not ready
+    // ============================================================
+    // Hazard and Pipeline Control
+    // ============================================================
+
+    // Stall is asserted when the next instruction needs data that is not ready
     wire stall;
 
     hazard_unit HAZARD (
@@ -142,11 +198,18 @@ module cpu_top(
         .forward_b(forward_b)
     );
 
+    // Pipeline control:
+    // pipe_enable pauses IF/ID and ID/EX during a stall.
+    // if_flush removes fetched instructions after a branch.
+    // id_flush inserts a bubble on branch or stall.
     wire pipe_enable = ~stall;
     wire if_flush = branch_taken;
     wire id_flush = branch_taken | stall;
 
-    // Update PC every clock
+    // ============================================================
+    // Program Counter Update Logic
+    // ============================================================
+
     always @(posedge clk) begin
         if (reset)
             pc <= 32'd0;
@@ -156,7 +219,10 @@ module cpu_top(
             pc <= pc + 32'd1;
     end
 
-    // Holds instruction between fetch and decode
+    // ============================================================
+    // IF/ID Pipeline Register
+    // ============================================================
+    // Holds the fetched instruction and PC between IF and ID.
     if_id_reg IF_ID (
         .clk(clk),
         .reset(reset),
@@ -168,7 +234,11 @@ module cpu_top(
         .instr_out(if_id_instr)
     );
 
-    // Turns instruction into control signals
+    // ============================================================
+    // Instruction Decoder
+    // ============================================================
+    // Converts the 49-bit instruction into register fields, immediate
+    // field, opcode, and datapath control signals.
     instruction_decoder_49 DECODER (
         .instr(if_id_instr),
         .opcode(dec_opcode),
@@ -189,7 +259,10 @@ module cpu_top(
         .use_rs2(dec_use_rs2)
     );
 
-    // Register file stores values for instructions
+    // ============================================================
+    // Register File
+    // ============================================================
+    // Reads rs1 and rs2 during decode and writes wb_data during writeback.
     Register_File RF (
         .clk(clk),
         .reset(reset),
@@ -202,13 +275,21 @@ module cpu_top(
         .busB(rf_busB)
     );
 
-    // Extends smaller immediate into full 32-bit value
+    // ============================================================
+    // Immediate Extension
+    // ============================================================
+    // Extends the 28-bit immediate field to 32 bits for ALU, memory,
+    // and branch target calculations.
     imm_extend IMM_EXT (
         .imm28(dec_imm28),
         .imm32(imm32)
     );
 
-    // Holds values before execute stage
+    // ============================================================
+    // ID/EX Pipeline Register
+    // ============================================================
+    // Stores decoded register data, immediate data, register numbers,
+    // and control signals before the execute stage.
     id_ex_reg ID_EX (
         .clk(clk),
         .reset(reset),
@@ -254,20 +335,31 @@ module cpu_top(
         .use_rs2_out(id_ex_use_rs2)
     );
 
-    // Choose correct values for ALU
+    // ============================================================
+    // Forwarding and ALU Input Selection
+    // ============================================================
+
+    // The value available for forwarding is the current writeback value.
     assign ex_forward_value = wb_data;
 
+    // Forward operand A if the previous instruction is writing to rs1.
     assign alu_a_in = forward_a ? ex_forward_value : id_ex_rs1_data;
 
+    // Operand B can come from the immediate, forwarded data, or rs2 data.
     assign alu_b_in = id_ex_alu_src_imm ? id_ex_imm32 :
                       (forward_b ? ex_forward_value : id_ex_rs2_data);
 
+    // Branch comparisons also need forwarded rs1 data when required.
     assign branch_rs1_in = forward_a ? ex_forward_value : id_ex_rs1_data;
 
-    // Forward the value being stored for ST instructions
+    // Store instructions need the forwarded rs2 value so the correct data
+    // is written to RAM even if the value was just produced.
     assign store_data_in = forward_b ? ex_forward_value : id_ex_rs2_data;
 
-    // ALU does math
+    // ============================================================
+    // ALU
+    // ============================================================
+    // Performs arithmetic, logic, shift, NOT, and pass-through operations.
     alu32 ALU (
         .a(alu_a_in),
         .b(alu_b_in),
@@ -276,7 +368,10 @@ module cpu_top(
         .zero(alu_zero)
     );
 
-    // Handles jumps
+    // ============================================================
+    // Branch Unit
+    // ============================================================
+    // Calculates branch target and determines if BZ, BNZ, or BRA is taken.
     branch_unit BRANCH (
         .pc_current(id_ex_pc),
         .rs1_value(branch_rs1_in),
@@ -287,7 +382,11 @@ module cpu_top(
         .branch_target(branch_target)
     );
 
-    // EX/MEM/WB pipeline register
+    // ============================================================
+    // EX/MEM/WB Pipeline Register
+    // ============================================================
+    // Carries the ALU result, store data, immediate, destination register,
+    // and memory/writeback control signals into the final pipeline stage.
     ex_mem_wb_reg EX_MEM_WB (
         .clk(clk),
         .reset(reset),
@@ -315,7 +414,11 @@ module cpu_top(
         .wb_sel_out(ex_mem_wb_sel)
     );
 
-    // Memory read/write
+    // ============================================================
+    // Data RAM Access
+    // ============================================================
+    // Store instructions write rs2 data into RAM.
+    // Load instructions read RAM data using the ALU result as the address.
     always @(posedge clk) begin
         if (ex_mem_mem_write)
             data_ram[ex_mem_alu_result[7:0]] <= ex_mem_rs2_data;
@@ -323,7 +426,15 @@ module cpu_top(
         mem_read_data <= data_ram[ex_mem_alu_result[7:0]];
     end
 
-    // Pick what gets written back
+    // ============================================================
+    // Writeback Mux
+    // ============================================================
+    // Selects the value that will be written back into the register file.
+    //
+    // wb_sel:
+    // 00 = ALU result
+    // 01 = RAM read data
+    // 10 = immediate value
     always @(*) begin
         case (ex_mem_wb_sel)
             2'b00: wb_data = ex_mem_alu_result;

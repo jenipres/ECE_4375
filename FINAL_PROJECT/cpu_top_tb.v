@@ -3,6 +3,27 @@
 Name: Jenico Preston
 R-Number: R11911335
 Assignment: Project 5
+
+Purpose:
+This is a self-checking testbench for the Project 5 pipelined CPU. It loads
+a test program into the CPU instruction ROM, runs the processor, and checks
+the final register/RAM values.
+
+The testbench prints PASS/FAIL results to the Vivado Tcl Console or simulation
+transcript. The goal is to prove that the CPU supports the required instruction
+set and that the pipeline, hazard, forwarding, memory, and writeback paths work.
+
+Test coverage:
+- LD immediate
+- LD memory
+- ST memory
+- ADD, SUB
+- AND, OR, XOR, NOT
+- SL, SR
+- BZ, BNZ, BRA
+- Register writeback
+- RAM write/read
+- Pipeline stalls/forwarding behavior
 */
 
 module cpu_top_tb;
@@ -12,19 +33,30 @@ module cpu_top_tb;
     integer errors;
     integer i;
 
+    // ============================================================
+    // Device Under Test
+    // ============================================================
+    // The CPU top module is instantiated here. The testbench directly
+    // accesses its internal ROM, RAM, and register file for verification.
     cpu_top DUT (
         .clk(clk),
         .reset(reset)
     );
 
-    // Clock: 10 ns period
+    // ============================================================
+    // Clock Generation
+    // ============================================================
+    // 10 ns clock period: toggles every 5 ns.
     initial begin
         clk = 1'b0;
         forever #5 clk = ~clk;
     end
 
+    // ============================================================
+    // Instruction Builder
+    // ============================================================
     // 49-bit instruction format:
-    // {rd, rs1, rs2, imm_mode, imm28, opcode}
+    // {rd[4:0], rs1[4:0], rs2[4:0], imm_mode, imm28[27:0], opcode[4:0]}
     function [48:0] make_instr;
         input [4:0] rd;
         input [4:0] rs1;
@@ -37,6 +69,10 @@ module cpu_top_tb;
         end
     endfunction
 
+    // ============================================================
+    // Register Check Task
+    // ============================================================
+    // Compares a register value to the expected value and prints PASS/FAIL.
     task check_reg;
         input [4:0] reg_num;
         input [31:0] expected;
@@ -53,6 +89,10 @@ module cpu_top_tb;
         end
     endtask
 
+    // ============================================================
+    // RAM Check Task
+    // ============================================================
+    // Compares a RAM location to the expected value and prints PASS/FAIL.
     task check_ram;
         input [7:0] addr;
         input [31:0] expected;
@@ -69,6 +109,9 @@ module cpu_top_tb;
         end
     endtask
 
+    // ============================================================
+    // Main Test Sequence
+    // ============================================================
     initial begin
         errors = 0;
         reset = 1'b1;
@@ -78,17 +121,20 @@ module cpu_top_tb;
         $display("Output prints to the Vivado Tcl Console / Simulation Transcript");
         $display("==============================================================");
 
-        // Wait one time step so cpu_top's initial block finishes first
+        // Wait one time step so cpu_top's initial block finishes first.
         #1;
 
-        // Clear the whole 64-location instruction ROM
+        // Clear the whole 64-location instruction ROM before loading
+        // this testbench's program.
         for (i = 0; i < 64; i = i + 1)
             DUT.instr_rom[i] = 49'd0;
 
-        // Clear RAM locations used by this test
+        // Clear RAM locations used by this test.
         DUT.data_ram[20] = 32'd0;
-        DUT.data_ram[30] = 32'd77;
 
+        // ========================================================
+        // Test Program Loaded into Instruction ROM
+        // ========================================================
         // Opcodes:
         // LD=01, ST=02, ADD=03, SUB=04, AND=05, OR=06, XOR=07, NOT=08,
         // SL=09, SR=0A, BZ=10, BNZ=11, BRA=12
@@ -105,34 +151,41 @@ module cpu_top_tb;
         DUT.instr_rom[9]  = make_instr(5'd10, 5'd1,  5'd0,  1'b1, 28'd2,   5'h09); // SL  R10, R1, #2 = 40
         DUT.instr_rom[10] = make_instr(5'd11, 5'd10, 5'd0,  1'b1, 28'd1,   5'h0A); // SR  R11, R10, #1 = 20
 
-        // ST stores rs2 into RAM[rs1 + imm32]. This stores R11 into RAM[20].
+        // ST stores rs2 into RAM[rs1 + imm32].
+        // This stores R11 into RAM[20].
         DUT.instr_rom[11] = make_instr(5'd0,  5'd0,  5'd11, 1'b1, 28'd20,  5'h02); // ST RAM[20], R11
 
-        // LD memory mode uses imm_mode = 0: rd = RAM[rs1 + imm32]
+        // LD memory mode uses imm_mode = 0.
+        // These load back the value stored in RAM[20].
         DUT.instr_rom[12] = make_instr(5'd14, 5'd0,  5'd0,  1'b0, 28'd20,  5'h01); // LD R14, RAM[20]
-        DUT.instr_rom[13] = make_instr(5'd15, 5'd0,  5'd0,  1'b0, 28'd30,  5'h01); // LD R15, RAM[20]
+        DUT.instr_rom[13] = make_instr(5'd15, 5'd0,  5'd0,  1'b0, 28'd20,  5'h01); // LD R15, RAM[20]
 
-        // Register shift tests
-        DUT.instr_rom[14] = make_instr(5'd12, 5'd2,  5'd1,  1'b0, 28'd0,   5'h09); // SL R12, R2, R1
-        DUT.instr_rom[15] = make_instr(5'd13, 5'd12, 5'd2,  1'b0, 28'd0,   5'h0A); // SR R13, R12, R2
+        // Register shift tests.
+        DUT.instr_rom[14] = make_instr(5'd12, 5'd2,  5'd1,  1'b0, 28'd0,   5'h09); // SL R12, R2, R1 = 5120
+        DUT.instr_rom[15] = make_instr(5'd13, 5'd12, 5'd2,  1'b0, 28'd0,   5'h0A); // SR R13, R12, R2 = 160
 
-        // Branch tests
-        DUT.instr_rom[16] = make_instr(5'd20, 5'd0,  5'd0,  1'b1, 28'd0,   5'h01); // LD R20, #0
-        DUT.instr_rom[17] = make_instr(5'd0,  5'd20, 5'd0,  1'b1, 28'd2,   5'h10); // BZ R20, +2
+        // Branch tests.
+        // Each branch skips a bad load of 999 if the branch works.
+        DUT.instr_rom[16] = make_instr(5'd20, 5'd0,  5'd0,  1'b1, 28'd0,   5'h01); // LD  R20, #0
+        DUT.instr_rom[17] = make_instr(5'd0,  5'd20, 5'd0,  1'b1, 28'd2,   5'h10); // BZ  R20, +2
         DUT.instr_rom[18] = make_instr(5'd21, 5'd0,  5'd0,  1'b1, 28'd999, 5'h01); // Should skip
-        DUT.instr_rom[19] = make_instr(5'd22, 5'd0,  5'd0,  1'b1, 28'd1,   5'h01); // LD R22, #1
+        DUT.instr_rom[19] = make_instr(5'd22, 5'd0,  5'd0,  1'b1, 28'd1,   5'h01); // LD  R22, #1
         DUT.instr_rom[20] = make_instr(5'd0,  5'd22, 5'd0,  1'b1, 28'd2,   5'h11); // BNZ R22, +2
         DUT.instr_rom[21] = make_instr(5'd23, 5'd0,  5'd0,  1'b1, 28'd999, 5'h01); // Should skip
         DUT.instr_rom[22] = make_instr(5'd0,  5'd0,  5'd0,  1'b1, 28'd2,   5'h12); // BRA +2
         DUT.instr_rom[23] = make_instr(5'd24, 5'd0,  5'd0,  1'b1, 28'd999, 5'h01); // Should skip
         DUT.instr_rom[24] = make_instr(5'd25, 5'd0,  5'd0,  1'b1, 28'd123, 5'h01); // End marker
 
+        // Hold reset briefly, then let the CPU run.
         #20;
         reset = 1'b0;
 
-        // Let CPU run long enough for stalls, branches, RAM, and writeback
+        // Let CPU run long enough for stalls, branches, RAM, and writeback.
         #4000;
 
+        // ========================================================
+        // Final Checks
+        // ========================================================
         $display("");
         $display("==============================================================");
         $display("FINAL SELF-CHECK RESULTS");
@@ -149,11 +202,15 @@ module cpu_top_tb;
         check_reg(5'd9,  32'hFFFFFFE2);
         check_reg(5'd10, 32'd40);
         check_reg(5'd11, 32'd20);
+
         check_ram(8'd20, 32'd20);
+
         check_reg(5'd14, 32'd20);
         check_reg(5'd15, 32'd20);
+
         check_reg(5'd12, 32'd5120);
         check_reg(5'd13, 32'd160);
+
         check_reg(5'd21, 32'd0);
         check_reg(5'd22, 32'd1);
         check_reg(5'd23, 32'd0);
